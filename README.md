@@ -1,4 +1,5 @@
-
+# Notice
+This repo is heavily borrowed from [here](https://github.com/jhhuang96/ConvLSTM-PyTorch) and this repo will be modified to meet my personal demands. Please clone the original repo instead. Thanks!
 
 # ConvLSTM-Pytorch
 
