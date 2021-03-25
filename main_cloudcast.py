@@ -28,7 +28,10 @@ parser.add_argument(
 parser.add_argument(
     "-cgru", "--convgru", help="use convgru as base cell", action="store_true"
 )
-parser.add_argument("-bs", "--batch_size", default=4, type=int, help="mini-batch size")
+parser.add_argument("-bs", "--batch_size", default=16, type=int, help="mini-batch size")
+parser.add_argument(
+    "-nw", "--num_workers", default=4, type=int, help="number of CPU you get"
+)
 parser.add_argument(
     "-dh", "--data_h", default=128, type=int, help="H of the data shape"
 )
@@ -91,10 +94,10 @@ validFolder = CloudCast(
     n_frames_output=args.frames_output,
 )
 trainLoader = torch.utils.data.DataLoader(
-    trainFolder, batch_size=args.batch_size, shuffle=False
+    trainFolder, batch_size=args.batch_size, num_workers=args.num_workers, shuffle=False
 )
 validLoader = torch.utils.data.DataLoader(
-    validFolder, batch_size=args.batch_size, shuffle=False
+    validFolder, batch_size=args.batch_size, num_workers=args.num_workers, shuffle=False
 )
 (
     convlstm_encoder_params,
