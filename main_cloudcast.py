@@ -1,13 +1,3 @@
-#!/usr/bin/env python
-# -*- encoding: utf-8 -*-
-"""
-@File    :   main.py
-@Time    :   2020/03/09
-@Author  :   jhhuang96
-@Mail    :   hjh096@126.com
-@Version :   1.0
-@Description:   
-"""
 from comet_ml import Experiment
 import os
 
@@ -16,7 +6,7 @@ from encoder import Encoder
 from decoder import Decoder
 from model import ED
 from net_params import get_params
-from data.mm import MovingMNIST
+from data.cloudcast import CloudCast
 import torch
 from torch import nn
 from torch.optim import lr_scheduler
@@ -30,7 +20,7 @@ from utils import flatten_opts
 # from tensorboardX import SummaryWriter
 import argparse
 
-TIMESTAMP = "2020-03-09T00-00-00"
+TIMESTAMP = "2021-03-25T00-00-00"
 parser = argparse.ArgumentParser()
 parser.add_argument(
     "-clstm", "--convlstm", help="use convlstm as base cell", action="store_true"
@@ -88,19 +78,17 @@ torch.backends.cudnn.benchmark = False
 
 save_dir = "./save_model/" + TIMESTAMP
 
-trainFolder = MovingMNIST(
+trainFolder = CloudCast(
     is_train=True,
     root="data/",
     n_frames_input=args.frames_input,
     n_frames_output=args.frames_output,
-    num_objects=[3],
 )
-validFolder = MovingMNIST(
+validFolder = CloudCast(
     is_train=False,
     root="data/",
     n_frames_input=args.frames_input,
     n_frames_output=args.frames_output,
-    num_objects=[3],
 )
 trainLoader = torch.utils.data.DataLoader(
     trainFolder, batch_size=args.batch_size, shuffle=False
@@ -108,7 +96,6 @@ trainLoader = torch.utils.data.DataLoader(
 validLoader = torch.utils.data.DataLoader(
     validFolder, batch_size=args.batch_size, shuffle=False
 )
-
 (
     convlstm_encoder_params,
     convlstm_decoder_params,
