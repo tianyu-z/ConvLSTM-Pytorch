@@ -22,6 +22,7 @@ def load_cs_small(root=default_data_path):
     path_test = os.path.join(root["200MB"], "test.pkl")
     with open(path_train, "rb") as file:
         data_train = pickle.load(file)
+        data_train = data_train
     with open(path_test, "rb") as file:
         data_test = pickle.load(file)
     return [data_train, data_test]
@@ -37,6 +38,7 @@ class CloudCast(data.Dataset):
         is_large=False,
         max_pxl_value=20,
         transform=None,
+        batchsize=16,
     ):
         """
         param num_objects: a list of number of possible objects.
@@ -56,6 +58,7 @@ class CloudCast(data.Dataset):
         self.n_frames_total = self.n_frames_input + self.n_frames_output
         self.transform = transform
         self.max_pxl_value = max_pxl_value
+        self.batchsize = batchsize
         # For generating data
         if self.is_large:
             self.image_size_ = 728
@@ -69,21 +72,33 @@ class CloudCast(data.Dataset):
         # this function aims to return the slice of the "video" with given idx
         # target shape: (n_frames_input + n_frames_output, H, W, C)
         H, W, T = cloudcast.shape
-        slice = cloudcast[:, :, idx : idx + self.n_frames_total]
-        slice = slice.reshape((self.n_frames_total, 1, H, W))
+        num_normal_batch = int((self.length - 1) / self.batchsize)
+        num_normal_data = num_normal_batch * self.batchsize
+
+        if idx <= num_normal_data:
+            slice = cloudcast[
+                :, :, idx : idx + self.n_frames_total
+            ]  # get a compelete slice from the begining
+        else:  # avoid getting errors when the rest of the data is not enough for a batch
+            diff = self.length - idx
+            slice = cloudcast[:, :, -diff - self.n_frames_total : -diff]
+        slice = slice.reshape((-1, 1, H, W))
         return slice
 
     def __getitem__(self, idx):
+        #         if self.length < idx-1:
+        #             return [idx, torch.empty(), torch.empty(), torch.empty(), np.zeros(1)]
         images = self.getslice(self.dataset, idx)
         input = images[: self.n_frames_input]
         if self.n_frames_output > 0:
-            output = images[self.n_frames_input : self.n_frames_total]
+            output = images[
+                -self.n_frames_output :
+            ]  # avoid error when the rest of the data is not enough for an output with len of n_frames_output
         else:
             output = []
         frozen = input[-1]
         output = torch.from_numpy(output / self.max_pxl_value).contiguous().float()
         input = torch.from_numpy(input / self.max_pxl_value).contiguous().float()
-
         out = [idx, output, input, frozen, np.zeros(1)]
         return out
 

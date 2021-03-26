@@ -28,7 +28,7 @@ parser.add_argument(
 parser.add_argument(
     "-cgru", "--convgru", help="use convgru as base cell", action="store_true"
 )
-parser.add_argument("-bs", "--batch_size", default=16, type=int, help="mini-batch size")
+parser.add_argument("-bs", "--batchsize", default=16, type=int, help="mini-batch size")
 parser.add_argument(
     "-nw", "--num_workers", default=4, type=int, help="number of CPU you get"
 )
@@ -86,18 +86,20 @@ trainFolder = CloudCast(
     root="data/",
     n_frames_input=args.frames_input,
     n_frames_output=args.frames_output,
+    batchsize=args.batchsize,
 )
 validFolder = CloudCast(
     is_train=False,
     root="data/",
     n_frames_input=args.frames_input,
     n_frames_output=args.frames_output,
+    batchsize=args.batchsize,
 )
 trainLoader = torch.utils.data.DataLoader(
-    trainFolder, batch_size=args.batch_size, num_workers=args.num_workers, shuffle=False
+    trainFolder, batch_size=args.batchsize, num_workers=args.num_workers, shuffle=False
 )
 validLoader = torch.utils.data.DataLoader(
-    validFolder, batch_size=args.batch_size, num_workers=args.num_workers, shuffle=False
+    validFolder, batch_size=args.batchsize, num_workers=args.num_workers, shuffle=False
 )
 (
     convlstm_encoder_params,
@@ -161,6 +163,26 @@ def train(exp=None):
     avg_train_losses = []
     # to track the average validation loss per epoch as the model trains
     avg_valid_losses = []
+    # Checking dataloader
+    print("Checking Dataloader!")
+    t = tqdm(trainLoader, leave=False, total=len(trainLoader))
+    for i, (idx, targetVar, inputVar, _, _) in enumerate(t):
+        assert targetVar.shape == torch.Size(
+            [args.batchsize, args.frames_output, 1, args.data_h, args.data_w]
+        )
+        assert inputVar.shape == torch.Size(
+            [args.batchsize, args.frames_input, 1, args.data_h, args.data_w]
+        )
+    print("TrainLoader checking is complete!")
+    t = tqdm(validLoader, leave=False, total=len(validLoader))
+    for i, (idx, targetVar, inputVar, _, _) in enumerate(t):
+        assert targetVar.shape == torch.Size(
+            [args.batchsize, args.frames_output, 1, args.data_h, args.data_w]
+        )
+        assert inputVar.shape == torch.Size(
+            [args.batchsize, args.frames_input, 1, args.data_h, args.data_w]
+        )
+    print("ValidLoader checking is complete!")
     # mini_val_loss = np.inf
     for epoch in range(cur_epoch, args.epochs + 1):
         if exp is not None:
@@ -176,7 +198,7 @@ def train(exp=None):
             net.train()
             pred = net(inputs)  # B,S,C,H,W
             loss = lossfunction(pred, label)
-            loss_aver = loss.item() / args.batch_size
+            loss_aver = loss.item() / args.batchsize
             train_losses.append(loss_aver)
             loss.backward()
             torch.nn.utils.clip_grad_value_(net.parameters(), clip_value=10.0)
@@ -201,7 +223,7 @@ def train(exp=None):
                 label = targetVar.to(device)
                 pred = net(inputs)
                 loss = lossfunction(pred, label)
-                loss_aver = loss.item() / args.batch_size
+                loss_aver = loss.item() / args.batchsize
                 # record validation loss
                 valid_losses.append(loss_aver)
                 # print ("validloss: {:.6f},  epoch : {:02d}".format(loss_aver,epoch),end = '\r', flush=True)
