@@ -1,6 +1,15 @@
 # Notice
 This repo is heavily borrowed from [here](https://github.com/jhhuang96/ConvLSTM-PyTorch) and this repo will be modified to meet my personal demands. Please clone the original repo instead. All the following informations from from the README.md in the original repo. Thanks!
 
+To run it with CloudCast dataset:  
+With ConvLSTM:  
+```
+python main_cloudcast.py -clstm
+```
+With ConvGRU:
+```
+python main_cloudcast.py -cgru
+```
 # ConvLSTM-Pytorch
 
 ## ConvRNN cell
