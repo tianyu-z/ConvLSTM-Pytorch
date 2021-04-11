@@ -36,7 +36,7 @@ class CloudCast(data.Dataset):
         n_frames_input,
         n_frames_output,
         is_large=False,
-        max_pxl_value=20,
+        max_pxl_value=15,
         transform=None,
         batchsize=16,
     ):
@@ -82,7 +82,7 @@ class CloudCast(data.Dataset):
         else:  # avoid getting errors when the rest of the data is not enough for a batch
             diff = self.length - idx
             slice = cloudcast[:, :, -diff - self.n_frames_total : -diff]
-        slice = slice.reshape((-1, 1, H, W))
+        slice = np.moveaxis(slice, -1, 0)[:, np.newaxis, :, :]
         return slice
 
     def __getitem__(self, idx):

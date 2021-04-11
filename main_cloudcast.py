@@ -1,4 +1,4 @@
-from comet_ml import Experiment
+from comet_ml import Experiment, ExistingExperiment
 import os
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
@@ -15,7 +15,7 @@ import sys
 from earlystopping import EarlyStopping
 from tqdm import tqdm
 import numpy as np
-from utils import flatten_opts
+from utils import flatten_opts, psnr, ssim, upload_images
 
 # from tensorboardX import SummaryWriter
 import argparse
@@ -39,12 +39,18 @@ parser.add_argument(
     "-dw", "--data_w", default=128, type=int, help="W of the data shape"
 )
 parser.add_argument(
-    "-se", "--save_every", default=10, type=int, help="save for every x epoches"
+    "-se", "--save_every", default=5, type=int, help="save for every x epoches"
+)
+parser.add_argument(
+    "-ct", "--continue_train", action="store_true", help="resume an epoch"
 )
 parser.add_argument("-lr", default=1e-4, type=float, help="G learning rate")
 parser.add_argument("-frames_input", default=10, type=int, help="sum of input frames")
 parser.add_argument(
     "-frames_output", default=10, type=int, help="sum of predict frames"
+)
+parser.add_argument(
+    "--cometid", type=str, default="", help="the comet id to resume exps",
 )
 parser.add_argument("-epochs", default=500, type=int, help="sum of epochs")
 parser.add_argument(
@@ -60,13 +66,21 @@ parser.add_argument(
 parser.add_argument(
     "--nocomet", action="store_true", help="not using comet_ml logging."
 )
-
+parser.add_argument(
+    "-cd", "--checkdata", action="store_true", help="not using comet_ml logging."
+)
 args = parser.parse_args()
 
 # start logging info in comet-ml
 if not args.nocomet:
     comet_exp = Experiment(workspace=args.workspace, project_name=args.projectname)
     # comet_exp.log_parameters(flatten_opts(args))
+else:
+    comet_exp = None
+if not args.nocomet and args.cometid != "":
+    comet_exp = ExistingExperiment(previous_experiment=args.cometid)
+elif not args.nocomet and args.cometid == "":
+    comet_exp = Experiment(workspace=args.workspace, project_name=args.projectname)
 else:
     comet_exp = None
 random_seed = 1996
@@ -137,10 +151,10 @@ def train(exp=None):
         net = nn.DataParallel(net)
     net.to(device)
 
-    if os.path.exists(os.path.join(save_dir, "checkpoint.pth.tar")):
+    if os.path.exists(os.path.join(save_dir, "checkpoint.pth")):
         # load existing model
         print("==> loading existing model")
-        model_info = torch.load(os.path.join(save_dir, "checkpoin.pth.tar"))
+        model_info = torch.load(os.path.join(save_dir, "checkpoint.pth"))
         net.load_state_dict(model_info["state_dict"])
         optimizer = torch.optim.Adam(net.parameters())
         optimizer.load_state_dict(model_info["optimizer"])
@@ -155,36 +169,49 @@ def train(exp=None):
         optimizer, factor=0.5, patience=4, verbose=True
     )
 
-    # to track the training loss as the model trains
-    train_losses = []
-    # to track the validation loss as the model trains
-    valid_losses = []
     # to track the average training loss per epoch as the model trains
     avg_train_losses = []
     # to track the average validation loss per epoch as the model trains
     avg_valid_losses = []
-    # Checking dataloader
-    print("Checking Dataloader!")
-    t = tqdm(trainLoader, leave=False, total=len(trainLoader))
-    for i, (idx, targetVar, inputVar, _, _) in enumerate(t):
-        assert targetVar.shape == torch.Size(
-            [args.batchsize, args.frames_output, 1, args.data_h, args.data_w]
-        )
-        assert inputVar.shape == torch.Size(
-            [args.batchsize, args.frames_input, 1, args.data_h, args.data_w]
-        )
-    print("TrainLoader checking is complete!")
-    t = tqdm(validLoader, leave=False, total=len(validLoader))
-    for i, (idx, targetVar, inputVar, _, _) in enumerate(t):
-        assert targetVar.shape == torch.Size(
-            [args.batchsize, args.frames_output, 1, args.data_h, args.data_w]
-        )
-        assert inputVar.shape == torch.Size(
-            [args.batchsize, args.frames_input, 1, args.data_h, args.data_w]
-        )
-    print("ValidLoader checking is complete!")
-    # mini_val_loss = np.inf
+    # pnsr ssim
+    avg_psnrs = {}
+    avg_ssims = {}
+    for j in range(args.frames_output):
+        avg_psnrs[j] = []
+        avg_ssims[j] = []
+    if args.checkdata:
+        # Checking dataloader
+        print("Checking Dataloader!")
+        t = tqdm(trainLoader, leave=False, total=len(trainLoader))
+        for i, (idx, targetVar, inputVar, _, _) in enumerate(t):
+            assert targetVar.shape == torch.Size(
+                [args.batchsize, args.frames_output, 1, args.data_h, args.data_w]
+            )
+            assert inputVar.shape == torch.Size(
+                [args.batchsize, args.frames_input, 1, args.data_h, args.data_w]
+            )
+        print("TrainLoader checking is complete!")
+        t = tqdm(validLoader, leave=False, total=len(validLoader))
+        for i, (idx, targetVar, inputVar, _, _) in enumerate(t):
+            assert targetVar.shape == torch.Size(
+                [args.batchsize, args.frames_output, 1, args.data_h, args.data_w]
+            )
+            assert inputVar.shape == torch.Size(
+                [args.batchsize, args.frames_input, 1, args.data_h, args.data_w]
+            )
+        print("ValidLoader checking is complete!")
+        # mini_val_loss = np.inf
     for epoch in range(cur_epoch, args.epochs + 1):
+        # to track the training loss as the model trains
+        train_losses = []
+        # to track the validation loss as the model trains
+        valid_losses = []
+        psnr_dict = {}
+        ssim_dict = {}
+        for j in range(args.frames_output):
+            psnr_dict[j] = 0
+            ssim_dict[j] = 0
+        image_log = []
         if exp is not None:
             exp.log_metric("epoch", epoch)
         ###################
@@ -217,8 +244,6 @@ def train(exp=None):
             net.eval()
             t = tqdm(validLoader, leave=False, total=len(validLoader))
             for i, (idx, targetVar, inputVar, _, _) in enumerate(t):
-                if i == 3000:
-                    break
                 inputs = inputVar.to(device)
                 label = targetVar.to(device)
                 pred = net(inputs)
@@ -226,6 +251,10 @@ def train(exp=None):
                 loss_aver = loss.item() / args.batchsize
                 # record validation loss
                 valid_losses.append(loss_aver)
+
+                for j in range(args.frames_output):
+                    psnr_dict[j] += psnr(pred[:, j], label[:, j])
+                    ssim_dict[j] += ssim(pred[:, j], label[:, j])
                 # print ("validloss: {:.6f},  epoch : {:02d}".format(loss_aver,epoch),end = '\r', flush=True)
                 t.set_postfix(
                     {
@@ -233,6 +262,17 @@ def train(exp=None):
                         "epoch": "{:02d}".format(epoch),
                     }
                 )
+                if i % 500 == 499:
+                    for k in range(args.frames_output):
+                        image_log.append(label[0, k].unsqueeze(0).repeat(1, 3, 1, 1))
+                        image_log.append(pred[0, k].unsqueeze(0).repeat(1, 3, 1, 1))
+                    upload_images(
+                        image_log,
+                        epoch,
+                        exp=exp,
+                        im_per_row=2,
+                        rows_per_log=int(len(image_log) / 2),
+                    )
         # tb.add_scalar('ValidLoss', loss_aver, epoch)
         torch.cuda.empty_cache()
         # print training/validation statistics
@@ -241,13 +281,17 @@ def train(exp=None):
         valid_loss = np.average(valid_losses)
         avg_train_losses.append(train_loss)
         avg_valid_losses.append(valid_loss)
-
+        for j in range(args.frames_output):
+            avg_psnrs[j].append(psnr_dict[j] / i)
+            avg_ssims[j].append(ssim_dict[j] / i)
         epoch_len = len(str(args.epochs))
 
         print_msg = (
             f"[{epoch:>{epoch_len}}/{args.epochs:>{epoch_len}}] "
             + f"train_loss: {train_loss:.6f} "
             + f"valid_loss: {valid_loss:.6f}"
+            + f"PSNR_1: {psnr_dict[0] / i:.6f}"
+            + f"SSIM_1: {ssim_dict[0] / i:.6f}"
         )
 
         # print(print_msg)
@@ -255,21 +299,51 @@ def train(exp=None):
         if exp is not None:
             exp.log_metric("TrainLoss", train_loss)
             exp.log_metric("ValidLoss", valid_loss)
-        train_losses = []
-        valid_losses = []
+            exp.log_metric("PSNR_1", psnr_dict[0] / i)
+            exp.log_metric("SSIM_1", ssim_dict[0] / i)
         pla_lr_scheduler.step(valid_loss)  # lr_scheduler
         model_dict = {
             "epoch": epoch,
             "state_dict": net.state_dict(),
             "optimizer": optimizer.state_dict(),
+            "avg_psnrs": avg_psnrs,
+            "avg_ssims": avg_ssims,
+            "avg_valid_losses": avg_valid_losses,
+            "avg_train_losses": avg_train_losses,
         }
-        if epoch % args.save_every == 0 and epoch != 0:
+        save_flag = False
+        if epoch % args.save_every == 0:
             torch.save(
                 model_dict,
                 save_dir
                 + "/"
-                + "checkpoint_{}_{:.6f}.pth.tar".format(epoch, valid_loss.item()),
+                + "checkpoint_{}_{:.6f}.pth".format(epoch, valid_loss.item()),
             )
+            print("Saved" + "checkpoint_{}_{:.6f}.pth".format(epoch, valid_loss.item()))
+            save_flag = True
+        if avg_psnrs[0][-1] == max(avg_psnrs[0]) and not save_flag:
+            torch.save(
+                model_dict, save_dir + "/" + "bestpsnr_1.pth",
+            )
+            print("Best psnr found and saved")
+            save_flag = True
+        if avg_ssims[0][-1] == max(avg_ssims[0]) and not save_flag:
+            torch.save(
+                model_dict, save_dir + "/" + "bestssim_1.pth",
+            )
+            print("Best ssim found and saved")
+            save_flag = True
+        if avg_valid_losses[-1] == min(avg_valid_losses) and not save_flag:
+            torch.save(
+                model_dict, save_dir + "/" + "bestvalidloss.pth",
+            )
+            print("Best validloss found and saved")
+            save_flag = True
+        if not save_flag:
+            torch.save(
+                model_dict, save_dir + "/" + "checkpoint.pth",
+            )
+            print("The latest normal checkpoint saved")
         early_stopping(valid_loss.item(), model_dict, epoch, save_dir)
         if early_stopping.early_stop:
             print("Early stopping")
