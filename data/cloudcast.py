@@ -22,7 +22,6 @@ def load_cs_small(root=default_data_path):
     path_test = os.path.join(root["200MB"], "test.pkl")
     with open(path_train, "rb") as file:
         data_train = pickle.load(file)
-        data_train = data_train
     with open(path_test, "rb") as file:
         data_test = pickle.load(file)
     return [data_train, data_test]

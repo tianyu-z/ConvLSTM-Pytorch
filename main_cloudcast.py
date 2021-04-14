@@ -44,6 +44,9 @@ parser.add_argument(
 parser.add_argument(
     "-ct", "--continue_train", action="store_true", help="resume an epoch"
 )
+parser.add_argument(
+    "--checkpoint", type=str, help="path of checkpoint for pretrained model"
+)
 parser.add_argument("-lr", default=1e-4, type=float, help="G learning rate")
 parser.add_argument("-frames_input", default=10, type=int, help="sum of input frames")
 parser.add_argument(
@@ -151,10 +154,10 @@ def train(exp=None):
         net = nn.DataParallel(net)
     net.to(device)
 
-    if os.path.exists(os.path.join(save_dir, "checkpoint.pth")):
+    if os.path.exists(args.checkpoint) and args.continue_train:
         # load existing model
         print("==> loading existing model")
-        model_info = torch.load(os.path.join(save_dir, "checkpoint.pth"))
+        model_info = torch.load(args.checkpoint)
         net.load_state_dict(model_info["state_dict"])
         optimizer = torch.optim.Adam(net.parameters())
         optimizer.load_state_dict(model_info["optimizer"])
